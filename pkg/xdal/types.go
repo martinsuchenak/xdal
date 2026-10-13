@@ -37,6 +37,12 @@ type DBInterface interface {
 	// WithTx executes fn within a transaction, auto-committing on success and
 	// auto-rolling back on error or panic.
 	WithTx(ctx context.Context, opts *sql.TxOptions, fn func(*Tx) error) error
+	// Schema returns a builder for schema statements in this connection's dialect.
+	Schema() *Schema
+	// Lock takes an exclusive named lock, waiting until it is free or ctx is done.
+	Lock(ctx context.Context, name string) (*Lock, error)
+	// TryLock attempts to take an exclusive named lock without waiting.
+	TryLock(ctx context.Context, name string) (*Lock, bool, error)
 }
 
 var (
@@ -52,6 +58,19 @@ var (
 	ErrBatchRowLength = errors.New("xdal: batch row has incorrect number of values")
 	// ErrTooManyInValues is returned when In() exceeds the maximum allowed values.
 	ErrTooManyInValues = errors.New("xdal: In() exceeds maximum of 1000 values")
+	// ErrUpsertNotSupported is returned when OnConflict is used with a dialect that has no upsert syntax.
+	ErrUpsertNotSupported = errors.New("xdal: upsert is not supported by this dialect")
+	// ErrUpsertConflictColumns is returned when OnConflict is called without conflict columns.
+	ErrUpsertConflictColumns = errors.New("xdal: OnConflict requires at least one conflict column")
+	// ErrUpsertAction is returned when OnConflict is not combined with DoUpdate or DoNothing.
+	ErrUpsertAction = errors.New("xdal: OnConflict must be combined with DoUpdate or DoNothing")
+	// ErrUpsertNothingToUpdate is returned when DoUpdate() has no columns left to update
+	// because every inserted column is a conflict column.
+	ErrUpsertNothingToUpdate = errors.New("xdal: DoUpdate has no non-conflict columns to update")
+	// ErrUpsertColumnNotInserted is returned when a conflict or DoUpdate column is not one of the inserted columns.
+	ErrUpsertColumnNotInserted = errors.New("xdal: upsert column is not an inserted column")
+	// ErrNotSupported is returned when a statement option has no equivalent in the dialect.
+	ErrNotSupported = errors.New("xdal: not supported by this dialect")
 )
 
 // MaxInValues is the upper limit for IN-clause expansion.
@@ -91,6 +110,7 @@ type SelectQuery struct {
 	orderBy  []string
 	limit    *int64
 	offset   *int64
+	lock     rowLock
 	dialect  Dialect
 	db       DBInterface
 }
@@ -103,6 +123,7 @@ type InsertQuery struct {
 	values    []interface{}
 	rows      [][]interface{}
 	returning []string
+	conflict  *conflictClause
 	dialect   Dialect
 	db        DBInterface
 }

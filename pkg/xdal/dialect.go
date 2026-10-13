@@ -65,6 +65,14 @@ type Dialect interface {
 	BoolLiteral(v bool) string
 	StringAggExpr(col, sep string) string
 	RandExpr() string
+	Name() string
+	Capabilities() Capabilities
+	Locker() AppLocker
+	BuildCreateTable(t *CreateTable) ([]string, error)
+	BuildAlterTable(t *AlterTable) ([]string, error)
+	BuildDropTable(t *DropTable) ([]string, error)
+	BuildCreateIndex(i *CreateIndex) ([]string, error)
+	BuildDropIndex(i *DropIndex) ([]string, error)
 }
 
 // BaseDialect provides a common SQL generation implementation that covers
@@ -85,6 +93,24 @@ type Dialect interface {
 //	d.AppendReturning = d.WriteReturning  // PostgreSQL/SQLite
 //	// or: d.PrependReturning = d.WriteOutput  // MSSQL
 type BaseDialect struct {
+	// DialectName identifies the database (DialectSQLite, DialectPostgres, DialectMySQL, DialectMSSQL).
+	DialectName string
+
+	// Caps lists optional features the database supports. Returning is derived from the hooks below.
+	Caps Capabilities
+
+	// UpsertStyle selects how InsertQuery.OnConflict is rendered.
+	UpsertStyle UpsertStyle
+
+	// LockStyle selects how SelectQuery.ForUpdate and SkipLocked are rendered.
+	LockStyle LockStyle
+
+	// AppLocker implements named locks for DB.Lock and DB.TryLock.
+	AppLocker AppLocker
+
+	// DDL configures schema statement generation (column types and syntax variants).
+	DDL DDLOptions
+
 	// Placeholder formats a parameter placeholder for the given 1-based index.
 	// Use QuestionMarkPlaceholder, DollarPlaceholder, or AtPPlaceholder.
 	Placeholder func(idx int) string
@@ -461,6 +487,7 @@ func (d *BaseDialect) BuildSelect(q *SelectQuery) (string, []interface{}, error)
 	b.WriteString(cols)
 	b.WriteString(" FROM ")
 	b.WriteString(d.QuoteIdentifier(q.table))
+	d.writeTableLockHint(&b, q.lock)
 
 	var args []interface{}
 	paramIdx := 1
@@ -509,6 +536,8 @@ func (d *BaseDialect) BuildSelect(q *SelectQuery) (string, []interface{}, error)
 		d.AppendLimit(&b, q.orderBy, q.limit, q.offset)
 	}
 
+	d.writeLockClause(&b, q.lock)
+
 	return b.String(), args, nil
 }
 
@@ -524,79 +553,74 @@ func (d *BaseDialect) BuildInsert(q *InsertQuery) (string, []interface{}, error)
 		return "", nil, ErrReturningNotSupported
 	}
 
-	var b strings.Builder
-	quoted := d.quoteColumns(q.keys)
+	groups, args, err := d.insertValueGroups(q)
+	if err != nil {
+		return "", nil, err
+	}
 
+	var update []string
+	if q.conflict != nil {
+		update, err = d.resolveConflict(q)
+		if err != nil {
+			return "", nil, err
+		}
+		if d.UpsertStyle == MergeUpsert {
+			return d.buildMerge(q, groups, update), args, nil
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("INSERT INTO ")
+	b.WriteString(d.QuoteIdentifier(q.table))
+	b.WriteString(" (")
+	b.WriteString(d.quoteColumns(q.keys))
+	b.WriteString(")")
+
+	if len(q.returning) > 0 && d.PrependReturning != nil {
+		d.PrependReturning(&b, q.returning)
+	}
+
+	b.WriteString(" VALUES ")
+	b.WriteString(strings.Join(groups, ", "))
+
+	if q.conflict != nil {
+		d.appendConflict(&b, q, update)
+	}
+
+	if len(q.returning) > 0 && d.PrependReturning == nil && d.AppendReturning != nil {
+		d.AppendReturning(&b, q.returning)
+	}
+
+	return b.String(), args, nil
+}
+
+// insertValueGroups renders one parenthesized placeholder group per row and the matching args.
+func (d *BaseDialect) insertValueGroups(q *InsertQuery) ([]string, []interface{}, error) {
 	if len(q.rows) == 0 {
 		placeholders := make([]string, len(q.keys))
 		for i := range placeholders {
 			placeholders[i] = d.Placeholder(i + 1)
 		}
-
-		b.WriteString("INSERT INTO ")
-		b.WriteString(d.QuoteIdentifier(q.table))
-		b.WriteString(" (")
-		b.WriteString(quoted)
-		b.WriteString(")")
-
-		if len(q.returning) > 0 {
-			if d.PrependReturning != nil {
-				d.PrependReturning(&b, q.returning)
-			}
-		}
-
-		b.WriteString(" VALUES (")
-		b.WriteString(strings.Join(placeholders, ", "))
-		b.WriteString(")")
-
-		if len(q.returning) > 0 {
-			if d.PrependReturning == nil && d.AppendReturning != nil {
-				d.AppendReturning(&b, q.returning)
-			}
-		}
-
-		return b.String(), q.values, nil
+		return []string{"(" + strings.Join(placeholders, ", ") + ")"}, q.values, nil
 	}
 
 	for _, row := range q.rows {
 		if len(row) != len(q.keys) {
-			return "", nil, ErrBatchRowLength
+			return nil, nil, ErrBatchRowLength
 		}
 	}
 
-	var allPlaceholders []string
-	var allArgs []interface{}
+	groups := make([]string, 0, len(q.rows))
+	var args []interface{}
 	for rowIdx, row := range q.rows {
 		rowPhs := make([]string, len(q.keys))
 		for i := range q.keys {
 			rowPhs[i] = d.Placeholder(rowIdx*len(q.keys) + i + 1)
 		}
-		allPlaceholders = append(allPlaceholders, "("+strings.Join(rowPhs, ", ")+")")
-		allArgs = append(allArgs, row...)
+		groups = append(groups, "("+strings.Join(rowPhs, ", ")+")")
+		args = append(args, row...)
 	}
-
-	b.WriteString("INSERT INTO ")
-	b.WriteString(d.QuoteIdentifier(q.table))
-	b.WriteString(" (")
-	b.WriteString(quoted)
-	b.WriteString(")")
-
-	if len(q.returning) > 0 {
-		if d.PrependReturning != nil {
-			d.PrependReturning(&b, q.returning)
-		}
-	}
-
-	b.WriteString(" VALUES ")
-	b.WriteString(strings.Join(allPlaceholders, ", "))
-
-	if len(q.returning) > 0 {
-		if d.PrependReturning == nil && d.AppendReturning != nil {
-			d.AppendReturning(&b, q.returning)
-		}
-	}
-
-	return b.String(), allArgs, nil
+	return groups, args, nil
 }
 
 func (d *BaseDialect) BuildUpdate(q *UpdateQuery) (string, []interface{}, error) {

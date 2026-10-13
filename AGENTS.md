@@ -18,6 +18,7 @@ pkg/mysql/        MySQL driver (embeds BaseDB, configures BaseDialect)
 pkg/postgres/     PostgreSQL driver
 pkg/sqlite/       SQLite driver
 pkg/mssql/        SQL Server driver
+pkg/migrate/      Versioned schema migrations built on the schema builder and named locks
 tests/integration/ Integration tests using Docker containers
 ```
 
@@ -38,6 +39,11 @@ tests/integration/ Integration tests using Docker containers
 | `DeleteQuery` | `pkg/xdal/types.go` | Fluent DELETE builder |
 | `WhereGroup` | `pkg/xdal/query_builder.go` | Collects conditions for parenthesized WHERE groups |
 | `Logger` | `pkg/xdal/logger.go` | Structured logging interface (compatible with fortix/go-libs/logger) |
+| `Capabilities` | `pkg/xdal/capabilities.go` | Optional features per dialect (Returning, Upsert, RowLocks, SkipLocked, TransactionalDDL, SharedAppLocks) |
+| `AppLocker`, `Lock` | `pkg/xdal/locking.go` | Named locks (`DB.Lock`/`TryLock`) and per-dialect implementations; row lock rendering |
+| `Schema`, `CreateTable`, `AlterTable`, `CreateIndex`, ... | `pkg/xdal/schema.go` | Fluent schema statements; `Statement` interface and `ExecStatements` |
+| `DDLOptions`, `TypeMap` | `pkg/xdal/schema_dialect.go` | Per-dialect DDL configuration and the `BaseDialect.Build*` DDL methods |
+| `migrate.Migrator` | `pkg/migrate/migrate.go` | Applies, reverts and reports migrations for one namespace |
 
 ### How Drivers Work
 
@@ -45,7 +51,9 @@ Each driver is ~27 lines: a struct embedding `*xdal.BaseDB` (promoting all DBInt
 
 ### How Dialects Work
 
-Query structs hold a `Dialect` reference. `Build()` delegates to `dialect.BuildXxx(q)` and returns `(string, []interface{}, error)`. `BaseDialect` is configured entirely via function fields (`Placeholder`, `AppendLimit`, `AppendReturning`, `PrependReturning`) and style flags (`QuoteStyle`, `BackslashEscapes`). Drivers configure hooks in their constructors — no need to override Build methods.
+Query structs hold a `Dialect` reference. `Build()` delegates to `dialect.BuildXxx(q)` and returns `(string, []interface{}, error)`. `BaseDialect` is configured entirely via function fields (`Placeholder`, `AppendLimit`, `AppendReturning`, `PrependReturning`) and style flags (`QuoteStyle`, `BackslashEscapes`, `UpsertStyle`, `LockStyle`), plus `DialectName`, `Caps`, `AppLocker` and `DDL` (a `DDLOptions` with the `TypeMap`). Drivers configure hooks in their constructors — no need to override Build methods.
+
+`BaseDialect` methods cannot see overrides on the embedding driver struct, so anything DDL generation needs from an override is passed in as a field (for example `DDL.BoolLiteral = d.BoolLiteral`).
 
 ## Build & Test Commands
 
@@ -127,6 +135,13 @@ See [docs/contributing.md](docs/contributing.md) for the full guide.
 - `modernc.org/sqlite` registers as `"sqlite"` not `"sqlite3"`
 - Identifier quoting: MySQL = backticks, PostgreSQL/SQLite = double quotes, MSSQL = brackets
 - MySQL does not support RETURNING — use `LastInsertId()` instead
+- MySQL upserts use the row alias syntax (8.0.19+); `DoNothing` assigns a table-qualified column to itself, because an unqualified name is ambiguous next to the alias
+- MySQL commits DDL implicitly (`TransactionalDDL` is false); `pkg/migrate` records such migrations as dirty until they finish
+- MySQL has no `CREATE INDEX IF NOT EXISTS` or `DROP INDEX IF EXISTS`; `CreateTable` indexes are declared inline instead
+- SQL Server upserts use `MERGE ... WITH (HOLDLOCK)`, guards use `IF OBJECT_ID(...)`, renames use `sp_rename`, and Restrict renders as `NO ACTION`
+- SQLite has no row locks (`ForUpdate` is ignored) and its named locks are process-local (`ProcessLocker`)
+- SQLite `:memory:` gives each pooled connection its own database; tests that use transactions or locks call `SetMaxOpenConns(1)`
+- Named locks on server databases hold a dedicated `*sql.Conn`; a failed release discards that connection rather than returning it to the pool
 
 ## File Map
 
@@ -137,6 +152,13 @@ See [docs/contributing.md](docs/contributing.md) for the full guide.
 | `pkg/xdal/dialect.go` | SQL generation, quoting, placeholder translation, SafeIdentifier |
 | `pkg/xdal/expressions.go` | Portable SQL expression helpers (ConcatExpr, LengthExpr, etc.) — methods on BaseDialect + QueryBuilder wrappers |
 | `pkg/xdal/logger.go` | Logging, Tx wrapper, BaseDB methods, DBExecutor, WithTx |
+| `pkg/xdal/capabilities.go` | Dialect names and capability flags |
+| `pkg/xdal/upsert.go` | OnConflict/DoUpdate/DoNothing and upsert rendering (ON CONFLICT, ON DUPLICATE KEY, MERGE) |
+| `pkg/xdal/locking.go` | Row lock methods and rendering, AppLocker implementations, DB.Lock/TryLock |
+| `pkg/xdal/schema.go` | Schema statement builders and column options |
+| `pkg/xdal/schema_dialect.go` | DDL generation, TypeMap, DDLOptions |
+| `pkg/xdal/dialects_test.go` | Exact SQL expected from each of the four dialects |
+| `pkg/migrate/migrate.go` | Migration runner |
 | `pkg/*/yourdb.go` | Driver constructor, NewQueryBuilder |
 | `pkg/*/dialect.go` | Driver-specific dialect config (function fields) + expression overrides via embedded dialect struct |
 | `tests/integration/helpers.go` | Database connection setup, schema, seed data |

@@ -40,6 +40,11 @@ rows, _ := db.Query(ctx, query, args...)
 - **Automatic dialect translation** — placeholders (`?` / `$1` / `@p1`), LIMIT/OFFSET vs FETCH NEXT, identifier quoting (backticks / double quotes / brackets)
 - **Structured logging** — inject any logger matching the `Logger` interface, or run silently
 - **Transaction wrapper** — `BeginTx` returns a `*Tx` with full logging
+- **Upserts** — `OnConflict(...).DoUpdate()` / `DoNothing()` rendered as `ON CONFLICT`, `ON DUPLICATE KEY UPDATE` or `MERGE`
+- **Locking** — row locks with `ForUpdate`, `SkipLocked` and `NoWait`, plus named locks (`Lock`, `TryLock`) backed by advisory locks, `GET_LOCK` or `sp_getapplock`
+- **Schema builder** — `CREATE TABLE`, `ALTER TABLE`, indexes and foreign keys with portable column types
+- **Migrations** — `pkg/migrate` runs versioned, namespaced migrations under a lock, with rollback and dirty-state handling for MySQL
+- **Capabilities** — `Dialect().Capabilities()` reports optional features so code can branch on features, not database names
 - **Extensible** — implement the `Dialect` interface to add new databases without touching shared code
 
 ## Supported Databases
