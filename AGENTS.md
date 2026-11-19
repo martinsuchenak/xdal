@@ -19,6 +19,7 @@ pkg/postgres/     PostgreSQL driver
 pkg/sqlite/       SQLite driver
 pkg/mssql/        SQL Server driver
 pkg/migrate/      Versioned schema migrations built on the schema builder and named locks
+pkg/xdaltest/     Test harness: runs one test against every dialect on a fresh database
 tests/integration/ Integration tests using Docker containers
 ```
 
@@ -44,6 +45,7 @@ tests/integration/ Integration tests using Docker containers
 | `Schema`, `CreateTable`, `AlterTable`, `CreateIndex`, ... | `pkg/xdal/schema.go` | Fluent schema statements; `Statement` interface and `ExecStatements` |
 | `DDLOptions`, `TypeMap` | `pkg/xdal/schema_dialect.go` | Per-dialect DDL configuration and the `BaseDialect.Build*` DDL methods |
 | `migrate.Migrator` | `pkg/migrate/migrate.go` | Applies, reverts and reports migrations for one namespace |
+| `xdaltest.Run`, `xdaltest.DB` | `pkg/xdaltest/xdaltest.go` | Runs a test once per dialect on a fresh database; servers from `XDAL_TEST_*_DSN` |
 
 ### How Drivers Work
 

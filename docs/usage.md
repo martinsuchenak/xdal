@@ -976,3 +976,33 @@ Behaviour:
 - **Transactions:** each migration runs in its own transaction and is recorded in the same transaction. On MySQL, where DDL commits implicitly, the record is written as dirty first and marked clean on success; a failure leaves it dirty and later runs return `migrate.ErrDirty` until `Resolve` is called.
 - **Validation:** renamed or changed migrations (`ErrChecksumMismatch`), migrations recorded but not defined (`ErrUnknownApplied`, or allow with `IgnoreUnknown`), and pending migrations older than the latest applied one (`ErrOutOfOrder`, or allow with `AllowOutOfOrder`).
 - **Checksums:** derived from version and name. Set `Migration.Checksum` to also detect content changes.
+
+## Testing Against Every Database
+
+`pkg/xdaltest` runs one test against each supported database, so code built on xdal can be checked on all of them with the same test:
+
+```go
+func TestCreateSite(t *testing.T) {
+    xdaltest.Run(t, func(t *testing.T, db *xdaltest.DB) {
+        // db.DB is an xdal.DBInterface on a fresh, empty database.
+        // db.Name is "sqlite", "postgres", "mysql" or "mssql".
+        if err := xdal.ExecStatements(ctx, db.DB, siteTable(db.DB.Schema())); err != nil {
+            t.Fatal(err)
+        }
+        q, args, _ := db.QueryBuilder().Insert("sites").Set("id", "s1").Build()
+        // ...
+    })
+}
+```
+
+- **Databases:** SQLite always runs, on a file in the test's temporary directory with foreign keys on. The others run when their server is configured and are skipped otherwise:
+
+  | Variable | Example |
+  |----------|---------|
+  | `XDAL_TEST_POSTGRES_DSN` | `postgres://xdal:testpass@localhost:15432/xdal_test?sslmode=disable` |
+  | `XDAL_TEST_MYSQL_DSN` | `root:testpass@tcp(localhost:13306)/xdal_test?parseTime=true` |
+  | `XDAL_TEST_MSSQL_DSN` | `sqlserver://sa:TestPass123!@localhost:11433?encrypt=disable` (URL form only) |
+
+- **CI:** set `XDAL_TEST_REQUIRE` to a comma-separated list of dialects, or `all`, to fail rather than skip when one isn't configured.
+- **Isolation:** each subtest gets its own schema (PostgreSQL) or database (MySQL, SQL Server), dropped when the test ends, so tests can create tables freely and run with `t.Parallel()`. The DSN's user needs the right to create them.
+- **One dialect:** `xdaltest.Open(t, xdal.DialectPostgres)` returns a single database, with the same skip rules.

@@ -80,6 +80,10 @@ Stop containers:
 task docker-down
 ```
 
+### Tests on Every Database with `xdaltest`
+
+`task test-dialects` starts the containers and runs the unit tests with the `XDAL_TEST_*_DSN` variables pointing at them, so `xdaltest.Run` tests cover every database instead of only SQLite.
+
 ### All Tests
 
 ```bash
@@ -279,5 +283,6 @@ Add a service to `docker-compose.test.yml` for your database, then add connectio
 |---------|-------------|
 | `task test` | Run unit tests |
 | `task test-integration` | Run integration tests (requires Docker) |
+| `task test-dialects` | Run unit tests with `xdaltest` on every database (requires Docker) |
 | `task docker-up` | Start test databases |
 | `task docker-down` | Stop test databases |

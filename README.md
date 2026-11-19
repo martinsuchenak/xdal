@@ -45,6 +45,7 @@ rows, _ := db.Query(ctx, query, args...)
 - **Schema builder** — `CREATE TABLE`, `ALTER TABLE`, indexes and foreign keys with portable column types
 - **Migrations** — `pkg/migrate` runs versioned, namespaced migrations under a lock, with rollback and dirty-state handling for MySQL
 - **Capabilities** — `Dialect().Capabilities()` reports optional features so code can branch on features, not database names
+- **Test harness** — `pkg/xdaltest` runs one test against SQLite, PostgreSQL, MySQL and SQL Server, each on a fresh database
 - **Extensible** — implement the `Dialect` interface to add new databases without touching shared code
 
 ## Supported Databases
