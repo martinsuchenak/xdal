@@ -26,7 +26,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -193,26 +192,29 @@ func openMySQL(t testing.TB, dsn string) *DB {
 
 func openMSSQL(t testing.TB, dsn string) *DB {
 	t.Helper()
-	admin := connect(t, "sqlserver", dsn)
-	name := uniqueName()
-	mustExec(t, admin, "CREATE DATABASE "+name)
-
 	u, err := url.Parse(dsn)
 	if err != nil || u.Scheme != "sqlserver" {
 		t.Fatalf("xdaltest: %s must be a sqlserver:// URL", EnvMSSQLDSN)
 	}
-	q := u.Query()
-	q.Set("database", name)
-	u.RawQuery = q.Encode()
-	db := connect(t, "sqlserver", u.String())
+	admin := connect(t, "sqlserver", dsn)
+	name := uniqueName()
+	mustExec(t, admin, "CREATE DATABASE "+name)
 
+	var db *sql.DB
 	t.Cleanup(func() {
-		_ = db.Close()
+		if db != nil {
+			_ = db.Close()
+		}
 		// Close any connection still open (a pooled one from another goroutine) before dropping.
 		_, _ = admin.Exec("ALTER DATABASE " + name + " SET SINGLE_USER WITH ROLLBACK IMMEDIATE")
 		_, _ = admin.Exec("DROP DATABASE " + name)
 		_ = admin.Close()
 	})
+
+	q := u.Query()
+	q.Set("database", name)
+	u.RawQuery = q.Encode()
+	db = connect(t, "sqlserver", u.String())
 	return &DB{Name: xdal.DialectMSSQL, SQL: db, DB: mssql.NewMSSQLDB(db, nil), Dialect: mssql.NewDialect()}
 }
 
@@ -265,5 +267,5 @@ func Available() []string {
 			out = append(out, d.name)
 		}
 	}
-	return slices.Clip(out)
+	return out
 }
