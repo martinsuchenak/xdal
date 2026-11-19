@@ -8,6 +8,18 @@ Changes before v0.1.0 are recorded in the [git history](https://github.com/marti
 
 ## [Unreleased]
 
+### Added
+
+- `pkg/xdaltest`: runs one test against every supported database. `Run(t, fn)`
+  calls `fn` once per dialect as a subtest, each with a fresh, empty database
+  (a temporary SQLite file, a new PostgreSQL schema, a new MySQL or SQL Server
+  database) that is dropped when the test ends. SQLite always runs; the others
+  run when `XDAL_TEST_POSTGRES_DSN`, `XDAL_TEST_MYSQL_DSN` or
+  `XDAL_TEST_MSSQL_DSN` is set and are skipped otherwise, unless
+  `XDAL_TEST_REQUIRE` names them. `Open(t, dialect)` returns a single database.
+- `task test-dialects` runs the unit tests with the harness pointed at the
+  Docker test databases.
+
 ## [0.1.0] - 2026-10-13
 
 ### Added

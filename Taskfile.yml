@@ -18,6 +18,17 @@ tasks:
     status:
       - docker compose -f docker-compose.test.yml ps --quiet 2>/dev/null | grep -q .
 
+  test-dialects:
+    desc: Run unit tests with xdaltest on every database (requires Docker)
+    deps: [docker-up]
+    env:
+      XDAL_TEST_POSTGRES_DSN: postgres://xdal:testpass@localhost:15432/xdal_test?sslmode=disable
+      XDAL_TEST_MYSQL_DSN: root:testpass@tcp(localhost:13306)/xdal_test?parseTime=true
+      XDAL_TEST_MSSQL_DSN: sqlserver://sa:TestPass123!@localhost:11433?encrypt=disable
+      XDAL_TEST_REQUIRE: all
+    cmds:
+      - go test ./pkg/... -count=1
+
   docker-up:
     desc: Start test databases
     cmds:
