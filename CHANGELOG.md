@@ -8,6 +8,8 @@ Changes before v0.1.0 are recorded in the [git history](https://github.com/marti
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-20
+
 ### Added
 
 - `pkg/xdaltest`: runs one test against every supported database. `Run(t, fn)`
@@ -64,5 +66,6 @@ Changes before v0.1.0 are recorded in the [git history](https://github.com/marti
 - `BuildInsert` now builds its value groups in one shared path for single-row and batch
   inserts. The SQL it produces for existing queries is unchanged.
 
-[Unreleased]: https://github.com/martinsuchenak/xdal/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/martinsuchenak/xdal/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/martinsuchenak/xdal/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/martinsuchenak/xdal/compare/v0.0.7...v0.1.0
